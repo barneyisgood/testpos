@@ -5,8 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>店舖收支管理</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-database-compat.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
 </head>
@@ -17,9 +15,9 @@
       <div class="flex justify-between items-start">
         <div>
           <h1 class="text-xl font-bold text-gray-800">店舖收支管理</h1>
-          <p class="text-gray-500 text-xs mt-0.5">Million Fishball Noodle</p>
+          <p class="text-gray-500 text-xs mt-0.5">Million Fishball Noodle · 本地儲存</p>
         </div>
-        <span class="bg-blue-100 text-blue-700 text-xs font-medium px-2 py-1 rounded">v1.0.3</span>
+        <span class="bg-blue-100 text-blue-700 text-xs font-medium px-2 py-1 rounded">v1.0.4</span>
       </div>
     </div>
 
@@ -88,10 +86,16 @@
         <canvas id="dailyChart" height="180"></canvas>
       </div>
 
-      <div class="bg-white rounded-xl shadow p-4">
+      <!-- 匯入 / 匯出 -->
+      <div class="bg-white rounded-xl shadow p-4 space-y-3">
         <button onclick="exportExcel()" class="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-medium">
-          下載 Excel
+          下載 Excel 備份
         </button>
+        <div>
+          <label class="block text-sm text-gray-600 mb-1">匯入 Excel 還原資料</label>
+          <input type="file" id="import-file" accept=".xlsx, .xls" class="w-full text-sm" onchange="importExcel(event)">
+        </div>
+        <p class="text-xs text-gray-500">建議定期下載 Excel 備份。換手機或清除資料後，可用匯入功能還原。</p>
       </div>
     </div>
 
@@ -278,22 +282,8 @@
   </div>
 
   <script>
-    const firebaseConfig = {
-      apiKey: "AIzaSyBMLw8j0YPL67EbvTkMqcSP7uTxuigp9t8",
-      authDomain: "million-fishballnoodle-backend.firebaseapp.com",
-      databaseURL: "https://million-fishballnoodle-backend-default-rtdb.asia-southeast1.firebasedatabase.app",
-      projectId: "million-fishballnoodle-backend",
-      storageBucket: "million-fishballnoodle-backend.firebasestorage.app",
-      messagingSenderId: "748499905313",
-      appId: "1:748499905313:web:774f012c36d1aea68c6c60",
-      measurementId: "G-TTERWFN8LZ"
-    };
-
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.database();
-
-    let incomes = {};
-    let expenses = {};
+    let incomes = JSON.parse(localStorage.getItem('incomes') || '{}');
+    let expenses = JSON.parse(localStorage.getItem('expenses') || '{}');
     let dailyChart = null;
     let ratioChart = null;
 
@@ -302,6 +292,12 @@
     document.getElementById('expense-date').value = today;
     document.getElementById('view-date').value = today;
     updateIncomeDateDisplay();
+    updateUI();
+
+    function saveData() {
+      localStorage.setItem('incomes', JSON.stringify(incomes));
+      localStorage.setItem('expenses', JSON.stringify(expenses));
+    }
 
     function updateIncomeDateDisplay() {
       const dateVal = document.getElementById('income-date').value;
@@ -327,11 +323,9 @@
       document.getElementById('btn-' + name).classList.remove('bg-white', 'text-gray-700');
     }
 
-    // 即時計算小計與每日總結
     function calcTotals() {
       const periods = ['morning', 'afternoon', 'night'];
-      let totalCash = 0, totalCdc = 0, totalNets = 0, totalDelivery = 0;
-      let grandTotal = 0;
+      let totalCash = 0, totalCdc = 0, totalNets = 0, totalDelivery = 0, grandTotal = 0;
 
       periods.forEach(p => {
         const cash = parseFloat(document.getElementById(`cash-${p}`).value) || 0;
@@ -339,14 +333,8 @@
         const nets = parseFloat(document.getElementById(`nets-${p}`).value) || 0;
         const delivery = parseFloat(document.getElementById(`delivery-${p}`).value) || 0;
         const sub = cash + cdc + nets + delivery;
-
         document.getElementById(`sub-${p}`).textContent = '$' + sub.toLocaleString();
-
-        totalCash += cash;
-        totalCdc += cdc;
-        totalNets += nets;
-        totalDelivery += delivery;
-        grandTotal += sub;
+        totalCash += cash; totalCdc += cdc; totalNets += nets; totalDelivery += delivery; grandTotal += sub;
       });
 
       document.getElementById('daily-total').textContent = '$' + grandTotal.toLocaleString();
@@ -373,43 +361,34 @@
       ];
 
       let saveCount = 0;
-      const promises = [];
-
       periods.forEach(period => {
         methods.forEach(method => {
           const amount = parseFloat(document.getElementById(`${method.id}-${period.key}`).value) || 0;
           if (amount > 0) {
-            promises.push(db.ref('incomes').push({
+            const id = Date.now() + Math.random().toString(36).slice(2, 8);
+            incomes[id] = {
               date, amount,
               method: method.name,
               period: period.name,
               note: period.name + '時段',
               createdAt: Date.now()
-            }));
+            };
             saveCount++;
           }
         });
-
-        const fishball = parseFloat(document.getElementById(`fishball-${period.key}`).value) || 0;
-        const meatball = parseFloat(document.getElementById(`meatball-${period.key}`).value) || 0;
-        if (fishball > 0 || meatball > 0) {
-          promises.push(db.ref('references').push({
-            date, period: period.name, fishball, meatball, createdAt: Date.now()
-          }));
-        }
       });
 
       if (saveCount === 0) return alert('請至少填寫一筆金額');
 
-      Promise.all(promises).then(() => {
-        alert(`成功儲存 ${saveCount} 筆收入！`);
-        periods.forEach(p => {
-          ['cash','cdc','nets','delivery','fishball','meatball'].forEach(id => {
-            document.getElementById(`${id}-${p.key}`).value = '';
-          });
+      saveData();
+      alert(`成功儲存 ${saveCount} 筆收入！`);
+      periods.forEach(p => {
+        ['cash','cdc','nets','delivery','fishball','meatball'].forEach(id => {
+          document.getElementById(`${id}-${p.key}`).value = '';
         });
-        calcTotals();
-      }).catch(err => alert('儲存失敗：' + err.message));
+      });
+      calcTotals();
+      updateUI();
     }
 
     function addExpense() {
@@ -420,17 +399,14 @@
 
       if (!date || !amount || amount <= 0) return alert('請填寫日期和金額');
 
-      db.ref('expenses').push({
-        date, amount, category, note, createdAt: Date.now()
-      }).then(() => {
-        alert('支出已儲存！');
-        document.getElementById('expense-amount').value = '';
-        document.getElementById('expense-note').value = '';
-      }).catch(err => alert('儲存失敗：' + err.message));
+      const id = Date.now() + Math.random().toString(36).slice(2, 8);
+      expenses[id] = { date, amount, category, note, createdAt: Date.now() };
+      saveData();
+      alert('支出已儲存！');
+      document.getElementById('expense-amount').value = '';
+      document.getElementById('expense-note').value = '';
+      updateUI();
     }
-
-    db.ref('incomes').on('value', snap => { incomes = snap.val() || {}; updateUI(); });
-    db.ref('expenses').on('value', snap => { expenses = snap.val() || {}; updateUI(); });
 
     function updateUI() {
       renderLists();
@@ -465,8 +441,20 @@
           </div>`).join('');
     }
 
-    function deleteIncome(id) { if (confirm('確定刪除？')) db.ref('incomes/' + id).remove(); }
-    function deleteExpense(id) { if (confirm('確定刪除？')) db.ref('expenses/' + id).remove(); }
+    function deleteIncome(id) {
+      if (confirm('確定刪除？')) {
+        delete incomes[id];
+        saveData();
+        updateUI();
+      }
+    }
+    function deleteExpense(id) {
+      if (confirm('確定刪除？')) {
+        delete expenses[id];
+        saveData();
+        updateUI();
+      }
+    }
 
     function updateDashboard() {
       const viewDate = document.getElementById('view-date').value || today;
@@ -566,6 +554,7 @@
       });
     }
 
+    // 匯出 Excel
     function exportExcel() {
       const incomeData = Object.values(incomes).map(i => ({
         類型: '收入', 日期: i.date, 金額: i.amount, 方式: i.method, 時段: i.period || '', 備註: i.note || ''
@@ -579,6 +568,63 @@
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, '收支紀錄');
       XLSX.writeFile(wb, '店舖收支_' + new Date().toISOString().slice(0,10) + '.xlsx');
+    }
+
+    // 匯入 Excel
+    function importExcel(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const sheet = workbook.Sheets[workbook.SheetNames[0]];
+          const json = XLSX.utils.sheet_to_json(sheet);
+
+          let incomeCount = 0, expenseCount = 0;
+
+          json.forEach(row => {
+            const type = row['類型'] || row['类型'] || '';
+            const date = row['日期'] || '';
+            const amount = parseFloat(row['金額'] || row['金额'] || 0);
+            if (!date || !amount) return;
+
+            const id = Date.now() + Math.random().toString(36).slice(2, 8);
+
+            if (type.includes('收入')) {
+              incomes[id] = {
+                date: String(date).slice(0, 10),
+                amount,
+                method: row['方式'] || '',
+                period: row['時段'] || row['时段'] || '',
+                note: row['備註'] || row['备注'] || '',
+                createdAt: Date.now()
+              };
+              incomeCount++;
+            } else if (type.includes('支出')) {
+              expenses[id] = {
+                date: String(date).slice(0, 10),
+                amount,
+                category: row['方式'] || '',
+                note: row['備註'] || row['备注'] || '',
+                createdAt: Date.now()
+              };
+              expenseCount++;
+            }
+          });
+
+          saveData();
+          updateUI();
+          alert(`匯入成功！\n收入：${incomeCount} 筆\n支出：${expenseCount} 筆`);
+          event.target.value = '';
+        } catch (err) {
+          alert('匯入失敗，請確認是本系統匯出的 Excel 檔案');
+          console.error(err);
+        }
+      };
+      reader.readAsArrayBuffer(file);
     }
   </script>
 </body>
